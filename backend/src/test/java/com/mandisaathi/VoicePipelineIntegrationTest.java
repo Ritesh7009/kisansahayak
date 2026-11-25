@@ -1,0 +1,449 @@
+package com.mandisaathi;
+
+import com.mandisaathi.entity.Commodity;
+import com.mandisaathi.entity.Mandi;
+import com.mandisaathi.entity.PriceRecord;
+import com.mandisaathi.repository.CommodityRepository;
+import com.mandisaathi.repository.MandiRepository;
+import com.mandisaathi.repository.PriceRecordRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+
+import static org.hamcrest.Matchers.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+@SpringBootTest
+@AutoConfigureMockMvc
+@ActiveProfiles("test")
+class VoicePipelineIntegrationTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private CommodityRepository commodityRepository;
+
+    @Autowired
+    private MandiRepository mandiRepository;
+
+    @Autowired
+    private PriceRecordRepository priceRecordRepository;
+
+    @BeforeEach
+    void seedTestData() {
+        priceRecordRepository.deleteAll();
+        mandiRepository.deleteAll();
+        commodityRepository.deleteAll();
+
+        // Commodities
+        Commodity wheat = new Commodity();
+        wheat.setCode("WHEAT");
+        wheat.setNameEn("Wheat");
+        wheat.setNameHi("गेहूं");
+        wheat.setNamePa("ਕਣਕ");
+        wheat.setCategory("CEREALS");
+        wheat.setDefaultUnit("QUINTAL");
+        commodityRepository.save(wheat);
+
+        Commodity mustard = new Commodity();
+        mustard.setCode("MUSTARD");
+        mustard.setNameEn("Mustard");
+        mustard.setNameHi("सरसों");
+        mustard.setNamePa("ਸਰ੍ਹੋਂ");
+        mustard.setCategory("OILSEEDS");
+        mustard.setDefaultUnit("QUINTAL");
+        commodityRepository.save(mustard);
+
+        // Mandis
+        Mandi khanna = new Mandi();
+        khanna.setCode("KHANNA_PB");
+        khanna.setNameEn("Khanna");
+        khanna.setNameHi("खन्ना");
+        khanna.setNamePa("ਖੰਨਾ");
+        khanna.setState("Punjab");
+        khanna.setDistrict("Ludhiana");
+        khanna.setActive(true);
+        mandiRepository.save(khanna);
+
+        Mandi sirsa = new Mandi();
+        sirsa.setCode("SIRSA_HR");
+        sirsa.setNameEn("Sirsa");
+        sirsa.setNameHi("सिरसा");
+        sirsa.setNamePa("ਸਿਰਸਾ");
+        sirsa.setState("Haryana");
+        sirsa.setDistrict("Sirsa");
+        sirsa.setActive(true);
+        mandiRepository.save(sirsa);
+
+        // Price Records
+        PriceRecord wheatKhanna = new PriceRecord();
+        wheatKhanna.setCommodityCode("WHEAT");
+        wheatKhanna.setMandiCode("KHANNA_PB");
+        wheatKhanna.setMinPrice(new BigDecimal("2380.00"));
+        wheatKhanna.setMaxPrice(new BigDecimal("2490.00"));
+        wheatKhanna.setModalPrice(new BigDecimal("2450.00"));
+        wheatKhanna.setPriceDate(LocalDate.now());
+        wheatKhanna.setUnit("QUINTAL");
+        wheatKhanna.setDataSource("Agmarknet / Punjab Mandi Board");
+        wheatKhanna.setVerified(true);
+        priceRecordRepository.save(wheatKhanna);
+
+        PriceRecord wheatSirsa = new PriceRecord();
+        wheatSirsa.setCommodityCode("WHEAT");
+        wheatSirsa.setMandiCode("SIRSA_HR");
+        wheatSirsa.setMinPrice(new BigDecimal("2350.00"));
+        wheatSirsa.setMaxPrice(new BigDecimal("2460.00"));
+        wheatSirsa.setModalPrice(new BigDecimal("2420.00"));
+        wheatSirsa.setPriceDate(LocalDate.now());
+        wheatSirsa.setUnit("QUINTAL");
+        wheatSirsa.setDataSource("Agmarknet / Haryana HSAMB");
+        wheatSirsa.setVerified(true);
+        priceRecordRepository.save(wheatSirsa);
+
+        PriceRecord mustardSirsa = new PriceRecord();
+        mustardSirsa.setCommodityCode("MUSTARD");
+        mustardSirsa.setMandiCode("SIRSA_HR");
+        mustardSirsa.setMinPrice(new BigDecimal("5450.00"));
+        mustardSirsa.setMaxPrice(new BigDecimal("5820.00"));
+        mustardSirsa.setModalPrice(new BigDecimal("5680.00"));
+        mustardSirsa.setPriceDate(LocalDate.now());
+        mustardSirsa.setUnit("QUINTAL");
+        mustardSirsa.setDataSource("Agmarknet / Haryana HSAMB");
+        mustardSirsa.setVerified(true);
+        priceRecordRepository.save(mustardSirsa);
+    }
+
+    @Test
+    void testValidMandiPriceQueryInHindi_PunjabWheat() throws Exception {
+        String json = """
+            {
+                "queryText": "आज पंजाब में गेहूं का भाव क्या चल रहा है?",
+                "language": "hi"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/voice/query")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.intent", is("MANDI_PRICE_LOOKUP")))
+                .andExpect(jsonPath("$.detectedLanguage", is("hi-IN")))
+                .andExpect(jsonPath("$.extractedEntities.commodity", is("WHEAT")))
+                .andExpect(jsonPath("$.extractedEntities.state", is("Punjab")))
+                .andExpect(jsonPath("$.responseTextHi", containsString("2450")))
+                .andExpect(jsonPath("$.responseTextHi", containsString("खन्ना")))
+                .andExpect(jsonPath("$.priceRecords", hasSize(greaterThanOrEqualTo(1))));
+    }
+
+    @Test
+    void testValidMandiPriceQueryInPunjabi_LudhianaWheat() throws Exception {
+        String json = """
+            {
+                "queryText": "ਲੁਧਿਆਣਾ ਵਿੱਚ ਕਣਕ ਦਾ ਕੀ ਭਾਅ ਹੈ?",
+                "language": "pa"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/voice/query")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.intent", is("MANDI_PRICE_LOOKUP")))
+                .andExpect(jsonPath("$.detectedLanguage", is("pa-IN")))
+                .andExpect(jsonPath("$.extractedEntities.commodity", is("WHEAT")))
+                .andExpect(jsonPath("$.extractedEntities.district", is("Ludhiana")))
+                .andExpect(jsonPath("$.responseTextPa", containsString("ਖੰਨਾ")))
+                .andExpect(jsonPath("$.responseTextPa", containsString("2450")))
+                .andExpect(jsonPath("$.priceRecords", hasSize(greaterThanOrEqualTo(1))));
+    }
+
+    @Test
+    void testExplicitKhannaMandiPriceQueryInPunjabi() throws Exception {
+        String json = """
+            {
+                "queryText": "ਖੰਨਾ ਮੰਡੀ ਵਿੱਚ ਕਣਕ ਦਾ ਕੀ ਭਾਅ ਹੈ?",
+                "language": "pa"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/voice/query")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.intent", is("MANDI_PRICE_LOOKUP")))
+                .andExpect(jsonPath("$.detectedLanguage", is("pa-IN")))
+                .andExpect(jsonPath("$.extractedEntities.commodity", is("WHEAT")))
+                .andExpect(jsonPath("$.extractedEntities.mandi", is("KHANNA_PB")))
+                .andExpect(jsonPath("$.responseTextPa", containsString("2450")))
+                .andExpect(jsonPath("$.priceRecords", hasSize(greaterThanOrEqualTo(1))));
+    }
+
+    @Test
+    void testValidMandiPriceQueryInEnglish_SirsaWheat() throws Exception {
+        String json = """
+            {
+                "queryText": "What is the wheat price in Sirsa mandi?",
+                "language": "en"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/voice/query")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.intent", is("MANDI_PRICE_LOOKUP")))
+                .andExpect(jsonPath("$.extractedEntities.commodity", is("WHEAT")))
+                .andExpect(jsonPath("$.extractedEntities.mandi", is("SIRSA_HR")))
+                .andExpect(jsonPath("$.responseText", containsString("2420")))
+                .andExpect(jsonPath("$.responseText", containsString("Sirsa")));
+    }
+
+    @Test
+    void testMissingMandiInformationAsksClarification() throws Exception {
+        String json = """
+            {
+                "queryText": "सरसों का भाव क्या है?",
+                "language": "hi"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/voice/query")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.intent", is("MANDI_PRICE_LOOKUP")))
+                .andExpect(jsonPath("$.extractedEntities.commodity", is("MUSTARD")))
+                .andExpect(jsonPath("$.responseTextHi", containsString("मंडी या राज्य का भाव जानना चाहते हैं")))
+                .andExpect(jsonPath("$.priceRecords", hasSize(greaterThanOrEqualTo(1))));
+    }
+
+    @Test
+    void testUnknownCommodityReturnsHelpfulMessage() throws Exception {
+        String json = """
+            {
+                "queryText": "स्मार्टफोन का भाव क्या है?",
+                "language": "hi"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/voice/query")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.intent", is("UNKNOWN")))
+                .andExpect(jsonPath("$.responseTextHi", containsString("कृषि उपज")));
+    }
+
+    @Test
+    void jodhpurJeeraPriceDoesNotResolveToPaddy() throws Exception {
+        commodityRepository.save(new Commodity("CUMIN", "Cumin (Jeera)", "जीरा", "ਜ਼ੀਰਾ", "SPICES", "QUINTAL"));
+        Mandi jodhpur = new Mandi();
+        jodhpur.setCode("JODHPUR_GRAIN_RJ");
+        jodhpur.setNameEn("Jodhpur (Grain)");
+        jodhpur.setNameHi("जोधपुर (अनाज)");
+        jodhpur.setState("Rajasthan");
+        jodhpur.setDistrict("Jodhpur");
+        jodhpur.setActive(true);
+        mandiRepository.save(jodhpur);
+        Mandi otherMarket = new Mandi();
+        otherMarket.setCode("OTHER_JODHPUR_RJ");
+        otherMarket.setNameEn("Another Jodhpur Yard");
+        otherMarket.setNameHi("जोधपुर यार्ड");
+        otherMarket.setState("Rajasthan");
+        otherMarket.setDistrict("Jodhpur");
+        otherMarket.setActive(true);
+        mandiRepository.save(otherMarket);
+
+
+        String query = """
+                {"queryText":"What is the price of jeera in Jeera Mandi Jodhpur?","language":"en"}
+                """;
+        mockMvc.perform(post("/api/v1/voice/query").contentType(MediaType.APPLICATION_JSON).content(query))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.extractedEntities.commodity", is("CUMIN")))
+                .andExpect(jsonPath("$.extractedEntities.mandi", is("JODHPUR_GRAIN_RJ")))
+                .andExpect(jsonPath("$.priceRecords", empty()));
+
+        PriceRecord filing = new PriceRecord();
+        filing.setCommodityCode("CUMIN");
+        filing.setMandiCode(jodhpur.getCode());
+        filing.setPriceDate(LocalDate.now().minusDays(2));
+        filing.setMinPrice(new BigDecimal("24000"));
+        filing.setModalPrice(new BigDecimal("25000"));
+        filing.setMaxPrice(new BigDecimal("26000"));
+        filing.setVariety("Cumin");
+        filing.setProvenanceType("LIVE_INGESTED");
+        filing.setDataSource("Test Agmarknet filing");
+        priceRecordRepository.save(filing);
+
+        String exactMarketQuery = """
+                {"queryText":"What is the cumin price at Jodhpur (Grain)?","language":"en"}
+                """;
+        mockMvc.perform(post("/api/v1/voice/query").contentType(MediaType.APPLICATION_JSON).content(exactMarketQuery))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.responseText", containsString("25000")))
+                .andExpect(jsonPath("$.priceRecords", hasSize(1)))
+                .andExpect(jsonPath("$.priceRecords[0].mandiCode", is("JODHPUR_GRAIN_RJ")))
+                .andExpect(jsonPath("$.priceRecords[0].variety", is("Cumin")));
+
+        // Required Regression Case: What is the price of jeera in Jeera Mandi Jodhpur?
+        mockMvc.perform(post("/api/v1/voice/query").contentType(MediaType.APPLICATION_JSON).content(query))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.extractedEntities.commodity", is("CUMIN")))
+                .andExpect(jsonPath("$.extractedEntities.mandi", is("JODHPUR_GRAIN_RJ")))
+                .andExpect(jsonPath("$.responseText", containsString("25000")))
+                .andExpect(jsonPath("$.responseText", containsString("Cumin")))
+                .andExpect(jsonPath("$.source", is("Test Agmarknet filing")))
+                .andExpect(jsonPath("$.priceRecords", hasSize(1)))
+                .andExpect(jsonPath("$.priceRecords[0].modalPrice", closeTo(25000.0, 0.1)));
+    }
+
+    @Test
+    void testFarmingAdvisoryYellowRustInWheat() throws Exception {
+        String query = """
+                {"queryText":"How to control yellow rust in wheat crop?","language":"en"}
+                """;
+        mockMvc.perform(post("/api/v1/voice/query").contentType(MediaType.APPLICATION_JSON).content(query))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.intent", is("FARMING_ADVISORY")))
+                .andExpect(jsonPath("$.responseText", containsString("Propiconazole")))
+                .andExpect(jsonPath("$.responseText", containsString("laboratory diagnosis")))
+                .andExpect(jsonPath("$.source", containsString("ICAR")));
+    }
+
+    @Test
+    void testFarmingAdvisoryWheatIrrigationSchedule() throws Exception {
+        String query = """
+                {"queryText":"When should I irrigate wheat crop?","language":"en"}
+                """;
+        mockMvc.perform(post("/api/v1/voice/query").contentType(MediaType.APPLICATION_JSON).content(query))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.intent", is("FARMING_ADVISORY")))
+                .andExpect(jsonPath("$.responseText", containsString("Crown Root Initiation")))
+                .andExpect(jsonPath("$.source", containsString("PAU")));
+    }
+
+    @Test
+    void testFarmingAdvisorySafeMoistureStorage() throws Exception {
+        String query = """
+                {"queryText":"What is the safe moisture limit for wheat storage?","language":"en"}
+                """;
+        mockMvc.perform(post("/api/v1/voice/query").contentType(MediaType.APPLICATION_JSON).content(query))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.intent", is("FARMING_ADVISORY")))
+                .andExpect(jsonPath("$.responseText", containsString("12%")))
+                .andExpect(jsonPath("$.source", containsString("WDRA")));
+    }
+
+    @Test
+    void testNoPriceRecordsFound() throws Exception {
+        String json = """
+            {
+                "queryText": "राजस्थान में गेहूं का भाव क्या है?",
+                "language": "hi"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/voice/query")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.intent", is("MANDI_PRICE_LOOKUP")))
+                .andExpect(jsonPath("$.extractedEntities.commodity", is("WHEAT")))
+                .andExpect(jsonPath("$.extractedEntities.state", is("Rajasthan")))
+                .andExpect(jsonPath("$.responseTextHi", containsString("कोई आधिकारिक भाव दर्ज नहीं है")));
+    }
+
+    @Test
+    void testMandiComparisonQuery() throws Exception {
+        String json = """
+            {
+                "queryText": "गेहूं के भाव की तुलना करें",
+                "language": "hi"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/voice/query")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.intent", is("MANDI_COMPARISON")))
+                .andExpect(jsonPath("$.responseTextHi", containsString("तुलना")))
+                .andExpect(jsonPath("$.responseTextHi", containsString("सर्वोत्तम मॉडल भाव")));
+    }
+
+    @Test
+    void testMandiComparisonQuery_InsufficientDataInState_DoesNotRecommendArbitraryMarket() throws Exception {
+        String json = """
+            {
+                "queryText": "पंजाब में किस मंडी में गेहूं का सबसे अच्छा भाव मिल रहा है?",
+                "language": "hi"
+            }
+            """;
+
+        mockMvc.perform(post("/api/v1/voice/query")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.intent", is("MANDI_COMPARISON")))
+                .andExpect(jsonPath("$.extractedEntities.state", is("Punjab")))
+                .andExpect(jsonPath("$.extractedEntities.commodity", is("WHEAT")))
+                .andExpect(jsonPath("$.responseTextHi", containsString("तुलनात्मक डेटा अपर्याप्त है")))
+                .andExpect(jsonPath("$.priceRecords", hasSize(1)));
+    }
+
+    @Test
+    void testMultipartAudioSubmission() throws Exception {
+        // 44-byte minimal canonical PCM WAV container
+        byte[] validWavBytes = new byte[]{
+                'R', 'I', 'F', 'F', 36, 0, 0, 0, 'W', 'A', 'V', 'E',
+                'f', 'm', 't', ' ', 16, 0, 0, 0, 1, 0, 1, 0,
+                (byte) 0x80, (byte) 0x3E, 0, 0, 0, (byte) 0x7D, 0, 0, 2, 0, 16, 0,
+                'd', 'a', 't', 'a', 0, 0, 0, 0
+        };
+
+        MockMultipartFile audioFile = new MockMultipartFile(
+                "audio",
+                "farmer_query.wav",
+                "audio/wav",
+                validWavBytes
+        );
+
+        mockMvc.perform(multipart("/api/v1/voice/audio")
+                        .file(audioFile)
+                        .param("language", "hi"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.transcript", notNullValue()))
+                .andExpect(jsonPath("$.intent", notNullValue()))
+                .andExpect(jsonPath("$.responseText", notNullValue()));
+    }
+
+    @Test
+    void testInvalidEmptyAudioSubmissionReturnsBadRequest() throws Exception {
+        MockMultipartFile emptyAudio = new MockMultipartFile(
+                "audio",
+                "empty.wav",
+                "audio/wav",
+                new byte[0]
+        );
+
+        mockMvc.perform(multipart("/api/v1/voice/audio")
+                        .file(emptyAudio)
+                        .param("language", "hi"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.aiServiceStatus", is("FAILED")));
+    }
+}
+
